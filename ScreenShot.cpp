@@ -2,6 +2,7 @@
 * File created by Andrew Keeling, University of Leeds
 * Take a screenshot using a specific scale bar and camera angle. 
 * For research in conjunction with Tim Yoda, Basel, Switzerland
+* For convenience I have also added a method to select a ray from camera view to mesh and save it
 */
 
 #include <vtkVersion.h>
@@ -33,6 +34,7 @@
 #include <vtkTransform.h>
 #include <vtkInteractorStyleTrackballCamera.h>
 #include <vtkPNGWriter.h>
+#include <vtkCellPicker.h>
 
 #include <vtkWindowToImageFilter.h>
 #include <Eigen/dense>
@@ -41,6 +43,8 @@
 bool fileExists(const char *fileName);
 void saveVTKMat4x4(double position[3], double focal_point[3], double view_up[3], double view_angle, std::string f_name);
 void loadVTKMat4x4(double position[3], double focal_point[3], double view_up[3], double& view_angle, std::string f_name);
+void saveLinePoints(double start[3], double end[3], std::string f_name);
+void savePoint(double point[3], std::string f_name);
 void KeypressCallbackFunction(
 	vtkObject* caller,
 	long unsigned int eventId,
@@ -159,6 +163,8 @@ int main(int argc, char* argv[])
 	  vtkSmartPointer<vtkInteractorStyleTrackballCamera>::New(); 
 
   renWinInteractor->SetInteractorStyle(style);
+  vtkSmartPointer<vtkCellPicker> pointPicker = vtkSmartPointer<vtkCellPicker>::New();
+  renWinInteractor->SetPicker(pointPicker);
 
  
   renderer->AddActor( actor );
@@ -233,6 +239,31 @@ void loadVTKMat4x4(double position[3], double focal_point[3], double view_up[3],
 
 }
 
+void saveLinePoints(double start[3], double end[3], std::string f_name)
+{
+	ofstream myFile2(f_name, ios::binary);
+
+	if (myFile2.is_open()) {
+		myFile2.write((const char*)&start[0], 3 * sizeof(double));
+		myFile2.write((const char*)&end[0], 3 * sizeof(double));
+		
+	}
+	myFile2.close();
+}
+
+void savePoint(double point[3], std::string f_name)
+{
+	ofstream myFile2(f_name, ios::binary);
+
+	if (myFile2.is_open()) {
+		myFile2.write((const char*)&point[0], 3 * sizeof(double));
+	}
+	myFile2.close();
+
+	std::cout << "Saving point as " << f_name << std::endl;
+
+}
+
 void KeypressCallbackFunction(vtkObject* caller, long unsigned int vtkNotUsed(eventId), void* vtkNotUsed(clientData), void* vtkNotUsed(callData))
 {
 	std::cout << "Keypress callback" << std::endl;
@@ -242,6 +273,30 @@ void KeypressCallbackFunction(vtkObject* caller, long unsigned int vtkNotUsed(ev
 
 	std::string letters = iren->GetKeySym();
 	std::cout << "Pressed: " << iren->GetKeySym() << std::endl;
+
+	if (letters == "p")
+	{
+		// Save the current camera position and the intersection on the surface
+		vtkSmartPointer<vtkCamera> cam = iren->GetRenderWindow()->GetRenderers()->GetFirstRenderer()->GetActiveCamera();
+
+		double position[3];
+		cam->GetPosition(position);
+		std::cout << "Camera Position: " << position[0] << " " << position[1] << " " << position[2] << std::endl;
+		
+		double picked[3];
+		iren->GetRenderWindow()->GetInteractor()->GetPicker()->GetPickPosition(picked);
+		std::cout << "Picked value: " << picked[0] << " " << picked[1] << " " << picked[2] << std::endl;
+
+		// Elongate the picked point along the line of sight
+		double vec[3];
+		vec[0] = picked[0] - position[0]; vec[1] = picked[1] - position[1]; vec[2] = picked[2] - position[2];
+		double end[3];
+		end[0] = position[0] + (5. * vec[0]); end[1] = position[1] + (5. * vec[1]); end[2] = position[2] + (5. * vec[2]);
+
+		saveLinePoints(position, end, "Line.vln");
+		savePoint(picked, "Point.pnt");
+
+	}
 
 	if (letters == "c")
 	{
