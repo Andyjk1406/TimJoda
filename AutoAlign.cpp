@@ -309,18 +309,22 @@ main (int argc, char **argv)
 				  Eigen::Matrix4f icpMatrix;
 				  PointCloudT::Ptr icp_alignedCloud(new PointCloudT);
 
-				  pcl::GeneralizedIterativeClosestPoint<PointNT, PointNT> icp;
-				  icp.setMaximumIterations(100);
+				  //pcl::GeneralizedIterativeClosestPoint<PointNT, PointNT> icp;
+				  pcl::IterativeClosestPointWithNormals<PointNT, PointNT> icp;
+				  icp.setMaximumIterations(1000);
 				  icp.setTransformationEpsilon(1e-12);
 				  icp.setEuclideanFitnessEpsilon(1e-12);
 				  icp.setInputSource(object_d);
 				  icp.setInputTarget(scene_d);
 
-				  icp.setMaxCorrespondenceDistance(2); // Start with 2mm search zone
+				  icp.setMaxCorrespondenceDistance(1); // Start with 1mm search zone
 				  icp.align(*icp_alignedCloud, transformation);
 				  icpMatrix = icp.getFinalTransformation();
 
-				  icp.setMaxCorrespondenceDistance(0.3); // Reduce to 0.3mm search zone
+				  icp.setInputSource(object_cloud);
+				  icp.setInputTarget(scene_cloud);
+
+				  icp.setMaxCorrespondenceDistance(0.1); // Reduce to 0.3mm search zone
 				  icp.align(*icp_alignedCloud, icpMatrix);
 				  icpMatrix = icp.getFinalTransformation();
 

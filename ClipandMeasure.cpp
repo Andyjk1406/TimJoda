@@ -40,15 +40,18 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/io/vtk_lib_io.h>
-#include <pcl/registration/gicp.h>
+#include <pcl/registration/icp.h>
 
 // Types
-typedef pcl::PointXYZ PointT;
+typedef pcl::PointNormal PointT;
 typedef pcl::PointCloud<PointT> PointCloudT;
 
 bool loadClipFunction(vtkSmartPointer<vtkPoints> pts, std::string filename);
 
 bool fileExists(const char *fileName);
+
+void TestPointNormals(vtkSmartPointer<vtkPolyData>& polydata);
+bool GetPointNormals(vtkSmartPointer<vtkPolyData>& polydata);
 
 int main(int argc, char* argv[])
 {
@@ -117,9 +120,15 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-		cout << "Usage : ...exe upper_test.ply lower_test.ply upper_base.ply lower_base.ply clipFile.clp";
+		cout << "Usage : ...exe upper_test.ply lower_test.ply upper_base.ply lower_base.ply clipFile.clp seed.pnt";
 		return 0;
 	}
+
+	// Check the vtk normals and add point normals if needed
+	TestPointNormals(upper_test);
+	TestPointNormals(lower_test);
+	TestPointNormals(upper_base);
+	TestPointNormals(lower_base);
 
 	// Clip the test upper.........................................................................
 	// Create the loop selector
@@ -143,6 +152,7 @@ int main(int argc, char* argv[])
 	//.............................................................................................
 
 	// Convert this to a pointcloud so we can do GICP
+	TestPointNormals(clippedPoly);
 	// Create PCL clouds for alignment (object and scene uppers)
 	PointCloudT::Ptr test_cloud_clipped(new PointCloudT);
 	pcl::io::vtkPolyDataToPointCloud(clippedPoly, *test_cloud_clipped);
@@ -153,15 +163,19 @@ int main(int argc, char* argv[])
 	Eigen::Matrix4f icpMatrix;
 	PointCloudT::Ptr icp_alignedCloud(new PointCloudT);
 
-	pcl::GeneralizedIterativeClosestPoint<PointT, PointT> icp;
+	//pcl::GeneralizedIterativeClosestPoint<PointT, PointT> icp;
+	pcl::IterativeClosestPointWithNormals<PointT, PointT> icp;
 	icp.setMaximumIterations(1000);
 	icp.setTransformationEpsilon(1e-12);
 	icp.setEuclideanFitnessEpsilon(1e-12);
 	icp.setInputSource(test_cloud_clipped);
 	icp.setInputTarget(test_cloud_clipped);
 
-	icp.setMaxCorrespondenceDistance(0.2); // Start with 0.2mm search zone
+	icp.setMaxCorrespondenceDistance(0.5); // Start with 0.5mm search zone
 	icp.align(*icp_alignedCloud);
+	icpMatrix = icp.getFinalTransformation();
+	icp.setMaxCorrespondenceDistance(0.05); // The a 0.05mm search zone
+	icp.align(*icp_alignedCloud, icpMatrix);
 	icpMatrix = icp.getFinalTransformation();
 	//.........................................................................................................
 
@@ -328,3 +342,145 @@ bool loadClipFunction(vtkSmartPointer<vtkPoints> pts, std::string filename)
 	return false;
 
 }
+
+void TestPointNormals(vtkSmartPointer<vtkPolyData>& polydata)
+{
+	std::cout << "In TestPointNormals: " << polydata->GetNumberOfPoints() << std::endl;
+	// Try to read normals directly
+	bool hasPointNormals = GetPointNormals(polydata);
+
+	if (!hasPointNormals)
+	{
+		std::cout << "No point normals were found. Computing normals..." << std::endl;
+
+		// Generate normals
+		vtkSmartPointer<vtkPolyDataNormals> normalGenerator = vtkSmartPointer<vtkPolyDataNormals>::New();
+#if VTK_MAJOR_VERSION <= 5
+		normalGenerator->SetInput(polydata);
+#else
+		normalGenerator->SetInputData(polydata);
+#endif
+		normalGenerator->ComputePointNormalsOn();
+		normalGenerator->ComputeCellNormalsOff();
+		normalGenerator->Update();
+		/*
+		// Optional settings
+		normalGenerator->SetFeatureAngle(0.1);
+		normalGenerator->SetSplitting(1);
+		normalGenerator->SetConsistency(0);
+		normalGenerator->SetAutoOrientNormals(0);
+		normalGenerator->SetComputePointNormals(1);
+		normalGenerator->SetComputeCellNormals(0);
+		normalGenerator->SetFlipNormals(0);
+		normalGenerator->SetNonManifoldTraversal(1);
+		*/
+
+		polydata = normalGenerator->GetOutput();
+
+		// Try to read normals again
+		hasPointNormals = GetPointNormals(polydata);
+
+		std::cout << "On the second try, has point normals? " << hasPointNormals << std::endl;
+
+	}
+	else
+	{
+		std::cout << "Point normals were found!" << std::endl;
+	}
+}
+
+bool GetPointNormals(vtkSmartPointer<vtkPolyData>& polydata)
+{
+	std::cout << "In GetPointNormals: " << polydata->GetNumberOfPoints() << std::endl;
+	std::cout << "Looking for point normals..." << std::endl;
+
+	// Count points
+	vtkIdType numPoints = polydata->GetNumberOfPoints();
+	std::cout << "There are " << numPoints << " points." << std::endl;
+
+	// Count triangles
+	vtkIdType numPolys = polydata->GetNumberOfPolys();
+	std::cout << "There are " << numPolys << " polys." << std::endl;
+
+	////////////////////////////////////////////////////////////////
+	// Double normals in an array
+	vtkDoubleArray* normalDataDouble =
+		vtkDoubleArray::SafeDownCast(polydata->GetPointData()->GetArray("Normals"));
+
+	if (normalDataDouble)
+	{
+		int nc = normalDataDouble->GetNumberOfTuples();
+		std::cout << "There are " << nc
+			<< " components in normalDataDouble" << std::endl;
+		return true;
+	}
+
+	////////////////////////////////////////////////////////////////
+	// Double normals in an array
+	vtkFloatArray* normalDataFloat =
+		vtkFloatArray::SafeDownCast(polydata->GetPointData()->GetArray("Normals"));
+
+	if (normalDataFloat)
+	{
+		int nc = normalDataFloat->GetNumberOfTuples();
+		std::cout << "There are " << nc
+			<< " components in normalDataFloat" << std::endl;
+		return true;
+	}
+
+	////////////////////////////////////////////////////////////////
+	// Point normals
+	vtkDoubleArray* normalsDouble =
+		vtkDoubleArray::SafeDownCast(polydata->GetPointData()->GetNormals());
+
+	if (normalsDouble)
+	{
+		std::cout << "There are " << normalsDouble->GetNumberOfComponents()
+			<< " components in normalsDouble" << std::endl;
+		return true;
+	}
+
+	////////////////////////////////////////////////////////////////
+	// Point normals
+	vtkFloatArray* normalsFloat =
+		vtkFloatArray::SafeDownCast(polydata->GetPointData()->GetNormals());
+
+	if (normalsFloat)
+	{
+		std::cout << "There are " << normalsFloat->GetNumberOfComponents()
+			<< " components in normalsFloat" << std::endl;
+		return true;
+	}
+
+	/////////////////////////////////////////////////////////////////////
+	// Generic type point normals
+	vtkDataArray* normalsGeneric = polydata->GetPointData()->GetNormals(); //works
+	if (normalsGeneric)
+	{
+		std::cout << "There are " << normalsGeneric->GetNumberOfTuples()
+			<< " normals in normalsGeneric" << std::endl;
+
+		double testDouble[3];
+		normalsGeneric->GetTuple(0, testDouble);
+
+		std::cout << "Double: " << testDouble[0] << " "
+			<< testDouble[1] << " " << testDouble[2] << std::endl;
+
+		// Can't do this:
+		/*
+		float testFloat[3];
+		normalsGeneric->GetTuple(0, testFloat);
+
+		std::cout << "Float: " << testFloat[0] << " "
+		<< testFloat[1] << " " << testFloat[2] << std::endl;
+		*/
+		return true;
+	}
+
+
+	// If the function has not yet quit, there were none of these types of normals
+	std::cout << "Normals not found!" << std::endl;
+	return false;
+
+}
+
