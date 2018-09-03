@@ -16,6 +16,7 @@
 #include <vtkCleanPolyData.h>
 #include <vtkProperty.h>
 #include <vtkPointData.h>
+#include <vtkVertexGlyphFilter.h>
 #include <vtkScalarBarActor.h>
 #include <vtkXMLPolyDataWriter.h>
 #include <vtkXMLPolyDataReader.h>
@@ -23,6 +24,11 @@
 #include <vtkPLYWriter.h>
 #include <vtkDataArray.h>
 #include <vtkDoubleArray.h>
+#include <vtkLinearSubdivisionFilter.h>
+#include <vtkTriangleFilter.h>
+#include <vtkAdaptiveSubdivisionFilter.h>
+#include <vtkPolyDataPointSampler.h>
+#include <vtkImplicitPolyDataDistance.h>
 
 
 float standard_deviation(vtkSmartPointer<vtkDistancePolyDataFilter> dist);
@@ -55,12 +61,21 @@ int main(int argc, char* argv[])
 	vtkSmartPointer<vtkSTLReader> reader1 = vtkSmartPointer<vtkSTLReader>::New();
 	reader1->SetFileName(upper_filename_stl.c_str());
 	reader1->Update();
-	upper = reader1->GetOutput();	
+	// Subdivision filters only work on triangles
+	vtkSmartPointer<vtkTriangleFilter> trianglesUpper = vtkSmartPointer<vtkTriangleFilter>::New();
+	trianglesUpper->SetInputConnection(reader1->GetOutputPort());
+	trianglesUpper->Update();
+	upper = trianglesUpper->GetOutput();
+	//upper = reader1->GetOutput();	
 
 	vtkSmartPointer<vtkSTLReader> reader2 = vtkSmartPointer<vtkSTLReader>::New();
 	reader2->SetFileName(lower_filename_stl.c_str());
 	reader2->Update();
-	lower = reader2->GetOutput();		
+	vtkSmartPointer<vtkTriangleFilter> trianglesLower = vtkSmartPointer<vtkTriangleFilter>::New();
+	trianglesLower->SetInputConnection(reader2->GetOutputPort());
+	trianglesLower->Update();
+	lower = trianglesLower->GetOutput();
+	//lower = reader2->GetOutput();		
 		
     }
   else
@@ -69,25 +84,117 @@ int main(int argc, char* argv[])
 	  return 0;
   }
 
+  // Upsampling
+  // Sample points at 0.025mm intervals
+  float sample_spacing = 0.025;
+  vtkSmartPointer<vtkPolyDataPointSampler> pointSampler = vtkSmartPointer<vtkPolyDataPointSampler>::New();
+  pointSampler->SetDistance(sample_spacing);
+  pointSampler->SetInputData(upper);
+  pointSampler->Update();
+
+  vtkIdType nPoints = pointSampler->GetOutput()->GetNumberOfPoints();
+  std::cout << "Number of upsampled points in upper : " << nPoints << std::endl;
+  vtkSmartPointer<vtkPolyData> pd_sampled = vtkSmartPointer<vtkPolyData>::New();
+  pd_sampled->DeepCopy(pointSampler->GetOutput());
+
+  // Need to add some cells (vertices) to thee geometry 
+  vtkSmartPointer<vtkVertexGlyphFilter> vertexGlyphFilter = vtkSmartPointer<vtkVertexGlyphFilter>::New();
+  vertexGlyphFilter->AddInputData(pd_sampled);
+  vertexGlyphFilter->Update();
+
+  vtkSmartPointer<vtkDoubleArray> distancesUpper = vtkSmartPointer<vtkDoubleArray>::New(); // The scalar array holding the distances
+  distancesUpper->SetNumberOfValues(nPoints);
+
+  // We want the signed distance to the test opposing arch
+  vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilter = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
+  distanceFilter->SetInput(lower);
+  for (vtkIdType i = 0; i < nPoints; i++)
+  {
+	  double test_point[3];
+	  pd_sampled->GetPoint(i, test_point);
+	  double opposing_point_test[3];
+	  double signedDistanceTest = distanceFilter->EvaluateFunctionAndGetClosestPoint(test_point, opposing_point_test);
+	  distancesUpper->SetValue(i, signedDistanceTest);
+  }
+
+  pd_sampled->GetPointData()->SetScalars(distancesUpper);
+
+  // Same for the lower.....
+  // Upsampling
+  // Sample points at 0.025mm intervals
+  vtkSmartPointer<vtkPolyDataPointSampler> pointSampler_lower = vtkSmartPointer<vtkPolyDataPointSampler>::New();
+  pointSampler_lower->SetDistance(sample_spacing);
+  pointSampler_lower->SetInputData(lower);
+  pointSampler_lower->Update();
+
+  vtkIdType nPoints_lower = pointSampler_lower->GetOutput()->GetNumberOfPoints();
+  std::cout << "Number of upsampled points in lower : " << nPoints_lower << std::endl;
+  vtkSmartPointer<vtkPolyData> pd_sampled_lower = vtkSmartPointer<vtkPolyData>::New();
+  pd_sampled_lower->DeepCopy(pointSampler_lower->GetOutput());
+
+  // Need to add some cells (vertices) to thee geometry 
+  vtkSmartPointer<vtkVertexGlyphFilter> vertexGlyphFilter_lower = vtkSmartPointer<vtkVertexGlyphFilter>::New();
+  vertexGlyphFilter_lower->AddInputData(pd_sampled_lower);
+  vertexGlyphFilter_lower->Update();
+
+  vtkSmartPointer<vtkDoubleArray> distancesLower = vtkSmartPointer<vtkDoubleArray>::New(); // The scalar array holding the distances
+  distancesLower->SetNumberOfValues(nPoints_lower);
+
+  // We want the signed distance to the test opposing arch
+  vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilter_lower = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
+  distanceFilter_lower->SetInput(upper);
+  for (vtkIdType i = 0; i < nPoints_lower; i++)
+  {
+	  double test_point[3];
+	  pd_sampled_lower->GetPoint(i, test_point);
+	  double opposing_point_test[3];
+	  double signedDistanceTest = distanceFilter_lower->EvaluateFunctionAndGetClosestPoint(test_point, opposing_point_test);
+	  distancesLower->SetValue(i, signedDistanceTest);
+  }
+
+  pd_sampled_lower->GetPointData()->SetScalars(distancesLower);
+
+
+ 
+/*
+
+  int numberOfSubdivisions = 2;
+  float max_edge_length = 0.025;
+  vtkSmartPointer<vtkAdaptiveSubdivisionFilter>  subdivisionFilterUpper = vtkSmartPointer<vtkAdaptiveSubdivisionFilter>::New();
+  //subdivisionFilterUpper->SetNumberOfSubdivisions(numberOfSubdivisions);
+  subdivisionFilterUpper->SetMaximumEdgeLength(max_edge_length);
+  subdivisionFilterUpper->SetInputData(upper);
+  subdivisionFilterUpper->Update();
+  vtkSmartPointer<vtkAdaptiveSubdivisionFilter>  subdivisionFilterLower = vtkSmartPointer<vtkAdaptiveSubdivisionFilter>::New();
+  //subdivisionFilterLower->SetNumberOfSubdivisions(numberOfSubdivisions);
+  subdivisionFilterLower->SetMaximumEdgeLength(max_edge_length);
+  subdivisionFilterLower->SetInputData(lower);
+  subdivisionFilterLower->Update();
+
+
   // Calculate the distance from target_crop to source
   vtkSmartPointer<vtkDistancePolyDataFilter> distanceFilter = vtkSmartPointer<vtkDistancePolyDataFilter>::New();
-  distanceFilter->SetInputData( 0, upper );
-  distanceFilter->SetInputData( 1, lower );
-  distanceFilter->ComputeSecondDistanceOn();
+  distanceFilter->SetInputData( 0, pd_sampled );
+  distanceFilter->SetInputData( 1, lower);
+  distanceFilter->ComputeSecondDistanceOff();
   distanceFilter->Update();
-
+*/
   // Get the mean/SD data and save it
   //float sd = standard_deviation(distanceFilter);
 
   // Save the upper with the distance scalars as a vtp file
   vtkNew<vtkXMLPolyDataWriter> writer;
   writer->SetFileName(upper_filename_vtp.c_str());
-  writer->SetInputConnection(distanceFilter->GetOutputPort(0));
+  //writer->SetInputConnection(distanceFilter->GetOutputPort(0));
+  writer->SetInputData(pd_sampled);
   writer->Write();
-  writer->SetFileName(lower_filename_vtp.c_str());
-  writer->SetInputConnection(distanceFilter->GetOutputPort(1));
-  writer->Update();
-  writer->Write();
+
+  vtkNew<vtkXMLPolyDataWriter> writer2;
+  writer2->SetFileName(lower_filename_vtp.c_str());
+ // writer->SetInputConnection(distanceFilter->GetOutputPort(1));
+  writer2->SetInputData(pd_sampled_lower);
+  writer2->Update();
+  writer2->Write();
 
 /*  
   vtkNew<vtkPolyData> orig;

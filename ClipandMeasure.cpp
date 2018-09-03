@@ -169,13 +169,13 @@ int main(int argc, char* argv[])
 	icp.setTransformationEpsilon(1e-12);
 	icp.setEuclideanFitnessEpsilon(1e-12);
 	icp.setInputSource(test_cloud_clipped);
-	icp.setInputTarget(test_cloud_clipped);
+	icp.setInputTarget(base_cloud);
 
-	icp.setMaxCorrespondenceDistance(0.5); // Start with 0.5mm search zone
+	icp.setMaxCorrespondenceDistance(0.2); // Start with 0.5mm search zone
 	icp.align(*icp_alignedCloud);
-	icpMatrix = icp.getFinalTransformation();
-	icp.setMaxCorrespondenceDistance(0.05); // The a 0.05mm search zone
-	icp.align(*icp_alignedCloud, icpMatrix);
+	//icpMatrix = icp.getFinalTransformation();
+	//icp.setMaxCorrespondenceDistance(0.05); // The a 0.05mm search zone
+	//icp.align(*icp_alignedCloud, icpMatrix);
 	icpMatrix = icp.getFinalTransformation();
 	//.........................................................................................................
 
