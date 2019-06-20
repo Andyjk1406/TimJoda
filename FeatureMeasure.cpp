@@ -520,6 +520,8 @@ void TestPointNormals(vtkSmartPointer<vtkPolyData>& polydata)
 #endif
 		normalGenerator->ComputePointNormalsOn();
 		normalGenerator->ComputeCellNormalsOff();
+		normalGenerator->SplittingOff();
+		normalGenerator->ConsistencyOff();
 		normalGenerator->Update();
 		/*
 		// Optional settings

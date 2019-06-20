@@ -1,13 +1,15 @@
 /**
 * File created by Andrew Keeling, University of Leeds
-* For research in conjunction with Tim Yoda, Basel, Switzerland
-* Load two pairs of upper and lower scans
-* Clip one of the scans using a loaded clip loop file (eg the occlusal surface of a molar)
-* Align (GICP) to the other scan and move th lower too
-* Take a standardised 3D line intersection (eg cusp tip) on both uppers
-* Find closest point on equivalent lowers
-* Save the distances and the 3D coordinates
+* For research in conjunction with Tim Yoda, Basel, Switzerland and extended to our Leeds experiments
+* Load a source and target scans (full arch generally) which are broadly aligned
+* Clip source using a regional radius (eg 10mm)
+* Align using VTK ICP, the clipped source to the target
+* Use a preselected point on target and find equivalent point on source (closest point)
+* Add this point to the source (InsertPoint) and move it back to original position and save
+* Grab a pre-selected closest point as above for the lower
 */
+
+#define PCL_NO_PRECOMPILE
 
 #include <vtkVersion.h>
 #include <vtkSmartPointer.h>
@@ -36,11 +38,15 @@
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkCellLocator.h>
 #include <vtkImplicitPolyDataDistance.h>
+#include <vtkSphereSource.h>
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/io/vtk_lib_io.h>
 #include <pcl/registration/icp.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/io/ply_io.h>
 
 // Types
 typedef pcl::PointNormal PointT;
@@ -56,111 +62,83 @@ bool GetPointNormals(vtkSmartPointer<vtkPolyData>& polydata);
 int main(int argc, char* argv[])
 {
 
-	vtkSmartPointer<vtkPolyData> upper_base = vtkSmartPointer<vtkPolyData>::New();
-	vtkSmartPointer<vtkPolyData> lower_base = vtkSmartPointer<vtkPolyData>::New();
-	vtkSmartPointer<vtkPolyData> upper_test = vtkSmartPointer<vtkPolyData>::New();
-	vtkSmartPointer<vtkPolyData> lower_test = vtkSmartPointer<vtkPolyData>::New();
-
+	vtkSmartPointer<vtkPolyData> source_mesh = vtkSmartPointer<vtkPolyData>::New();
+	vtkSmartPointer<vtkPolyData> target_mesh = vtkSmartPointer<vtkPolyData>::New();
+	
 	vtkSmartPointer<vtkPoints> pts = vtkSmartPointer<vtkPoints>::New();;
-	double seed[3]; // The seed point from which to take the measurements
+	
+	std::string target_filename_base, source_filename_base;
+	float clip_radius;
+	int target_base_point_idx, source_new_point_idx;
+	std::string tooth_name;
 
-	std::string upper_filename_base, lower_filename_base;
-	std::string upper_filename_test, lower_filename_test;
-	std::string clp_filename, pnt_filename;
-
-	// Load the 4 PLY files, uppers and lowers and a clip function
-	if (argc == 7)
+	// Load the 2 PLY files, a clip radius and a seed point for target
+	if (argc == 5)
 	{
 
 		// Assumes the '.ply' has been given
-		upper_filename_test = argv[1];
-		lower_filename_test = argv[2];
-		upper_filename_base = argv[3];
-		lower_filename_base = argv[4];
+		target_filename_base = argv[1];
+		source_filename_base = argv[2];
+
+		clip_radius = atof(argv[3]);
+		target_base_point_idx = atoi(argv[4]);
 
 		// Load the polydatas
 		vtkSmartPointer<vtkPLYReader> reader = vtkSmartPointer<vtkPLYReader>::New();
-		reader->SetFileName(upper_filename_test.c_str());
-		std::cout << "Loading : " << upper_filename_test << std::endl;
+		reader->SetFileName(target_filename_base.c_str());
+		std::cout << "Loading : " << target_filename_base << std::endl;
 		reader->Update();
-		upper_test->DeepCopy(reader->GetOutput());
+		target_mesh->DeepCopy(reader->GetOutput());
 
-		reader->SetFileName(lower_filename_test.c_str());
-		std::cout << "Loading : " << lower_filename_test << std::endl;
+		reader->SetFileName(source_filename_base.c_str());
+		std::cout << "Loading : " << source_filename_base << std::endl;
 		reader->Update();
-		lower_test->DeepCopy(reader->GetOutput());
-
-		reader->SetFileName(upper_filename_base.c_str());
-		std::cout << "Loading : " << upper_filename_base << std::endl;
-		reader->Update();
-		upper_base->DeepCopy(reader->GetOutput());
-
-		reader->SetFileName(lower_filename_base.c_str());
-		std::cout << "Loading : " << lower_filename_base << std::endl;
-		reader->Update();
-		lower_base->DeepCopy(reader->GetOutput());
-
-		// Load the clip function
-		clp_filename = argv[5];
-		if (!loadClipFunction(pts, clp_filename)) {
-			std::cout << "Error loading clip file : " << clp_filename << std::endl;
-			return -1;
-		}
-
-		// Load the seed point
-		pnt_filename = argv[6];
-		ifstream myFile2(pnt_filename, ios::binary);
-		if (myFile2.is_open()) {
-			myFile2.read((char*)&seed[0], 3 * sizeof(double));
-		}
-		myFile2.close();
-
-		std::cout << "Loaded seed point as " << seed[0] << "," << seed[1] << "," <<seed[2] << std::endl;
+		source_mesh->DeepCopy(reader->GetOutput());
 
 	}
 	else
 	{
-		cout << "Usage : ...exe upper_test.ply lower_test.ply upper_base.ply lower_base.ply clipFile.clp seed.pnt";
+		cout << "Usage : ...exe target_mesh.ply source_mesh.ply clip_radius target_base_point_idx";
 		return 0;
 	}
 
 	// Check the vtk normals and add point normals if needed
-	TestPointNormals(upper_test);
-	TestPointNormals(lower_test);
-	TestPointNormals(upper_base);
-	TestPointNormals(lower_base);
+	TestPointNormals(target_mesh);
+	TestPointNormals(source_mesh);
 
-	// Clip the test upper.........................................................................
-	// Create the loop selector
-	vtkNew<vtkImplicitSelectionLoop> loop_select;
-	loop_select->SetLoop(pts);
+	// Create PCL clouds for alignment (object and scene uppers and lowers)
+	PointCloudT::Ptr source_cloud(new PointCloudT);
+	pcl::io::vtkPolyDataToPointCloud(source_mesh, *source_cloud);
+	PointCloudT::Ptr target_cloud(new PointCloudT);
+	pcl::io::vtkPolyDataToPointCloud(target_mesh, *target_cloud);
+	
+	// Now crop/filter the test upper and lower by the clip_radius to create 'local' clouds (about the size of a single tooth)
+	// Neighbors within radius search
+	std::cout << "Clipping test surface..." << std::endl;
+	pcl::KdTreeFLANN<PointT> kdtree;
+	kdtree.setInputCloud(source_cloud);
+	PointT searchPoint_target = target_cloud->points[target_base_point_idx];
+	pcl::PointIndices::Ptr inliers_source(new pcl::PointIndices());
+	std::vector<float> pointRadiusSquaredDistance;
+	if (kdtree.radiusSearch(searchPoint_target, clip_radius, inliers_source->indices, pointRadiusSquaredDistance) == 0)
+	{
+		std::cout << "No matching points found - clipping source failed" << std::endl;
+		return -1;
+	}
 
-	// Cut out the selected mesh
-	vtkSmartPointer<vtkClipPolyData> clipPolyData = vtkSmartPointer<vtkClipPolyData>::New();
-	clipPolyData->SetClipFunction(loop_select);
-	clipPolyData->SetInputData(upper_test);
-	clipPolyData->SetInsideOut(1);
-	clipPolyData->Update();
+	// Extract the inliers
+	pcl::ExtractIndices<PointT> extract;
+	PointCloudT::Ptr clipped_source_cloud(new PointCloudT);
+	extract.setInputCloud(source_cloud);
+	extract.setIndices(inliers_source);
+	extract.setNegative(false);
+	extract.filter(*clipped_source_cloud);
 
-	// Clean the mesh
-	vtkSmartPointer<vtkCleanPolyData> cleanPolyData = vtkSmartPointer<vtkCleanPolyData>::New();
-	cleanPolyData->SetInputData(clipPolyData->GetOutput());
-	cleanPolyData->Update();
 
-	vtkSmartPointer<vtkPolyData> clippedPoly = vtkSmartPointer<vtkPolyData>::New();
-	clippedPoly->DeepCopy(cleanPolyData->GetOutput());
-	//.............................................................................................
+	// Now we have source clipped pointclouds
 
-	// Convert this to a pointcloud so we can do GICP
-	TestPointNormals(clippedPoly);
-	// Create PCL clouds for alignment (object and scene uppers)
-	PointCloudT::Ptr test_cloud_clipped(new PointCloudT);
-	pcl::io::vtkPolyDataToPointCloud(clippedPoly, *test_cloud_clipped);
-	PointCloudT::Ptr base_cloud(new PointCloudT);
-	pcl::io::vtkPolyDataToPointCloud(upper_base, *base_cloud);
-
-	// Align source to target using GICP........................................................................
-	Eigen::Matrix4f icpMatrix;
+	// Align source clipped cloud to upper base cloud /////////////////////////////////////////////////////////////////////
+	Eigen::Matrix4f icpMatrix_source;
 	PointCloudT::Ptr icp_alignedCloud(new PointCloudT);
 
 	//pcl::GeneralizedIterativeClosestPoint<PointT, PointT> icp;
@@ -168,103 +146,85 @@ int main(int argc, char* argv[])
 	icp.setMaximumIterations(1000);
 	icp.setTransformationEpsilon(1e-12);
 	icp.setEuclideanFitnessEpsilon(1e-12);
-	icp.setInputSource(test_cloud_clipped);
-	icp.setInputTarget(base_cloud);
+	icp.setInputSource(clipped_source_cloud);
+	icp.setInputTarget(target_cloud);
 
 	icp.setMaxCorrespondenceDistance(0.2); // Start with 0.5mm search zone
 	icp.align(*icp_alignedCloud);
-	//icpMatrix = icp.getFinalTransformation();
-	//icp.setMaxCorrespondenceDistance(0.05); // The a 0.05mm search zone
-	//icp.align(*icp_alignedCloud, icpMatrix);
-	icpMatrix = icp.getFinalTransformation();
+	icpMatrix_source = icp.getFinalTransformation();
+	icp.setMaxCorrespondenceDistance(0.05); // The a 0.05mm search zone
+	icp.align(*icp_alignedCloud, icpMatrix_source);
+	icpMatrix_source = icp.getFinalTransformation();
 	//.........................................................................................................
 
 	// Convert the transformation into a vtk readable form
-	vtkSmartPointer<vtkMatrix4x4> VTKmatrix = vtkSmartPointer<vtkMatrix4x4>::New();
+	vtkSmartPointer<vtkMatrix4x4> VTKmatrix_source = vtkSmartPointer<vtkMatrix4x4>::New();
 	for (unsigned int r = 0; r < 4; r++) {
 		for (unsigned int c = 0; c < 4; c++)
-			VTKmatrix->Element[r][c] = icpMatrix(r, c);
+			VTKmatrix_source->Element[r][c] = icpMatrix_source(r, c);
 	}
 
-	// Transform the test polydatas............................................................................
+	// Transform the test polydata............................................................................
 	vtkSmartPointer<vtkTransform> transform = vtkSmartPointer<vtkTransform>::New();
-	transform->SetMatrix(VTKmatrix);
+	transform->SetMatrix(VTKmatrix_source);
 
-	vtkSmartPointer<vtkPolyData> upper_test_transformed = vtkSmartPointer<vtkPolyData>::New();
-	vtkSmartPointer<vtkPolyData> lower_test_transformed = vtkSmartPointer<vtkPolyData>::New();
-
+	vtkSmartPointer<vtkPolyData> source_mesh_transformed = vtkSmartPointer<vtkPolyData>::New();
+	
 	vtkSmartPointer<vtkTransformPolyDataFilter> filter = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
 	filter->SetTransform(transform);
-	filter->SetInputData(upper_test);
+	filter->SetInputData(source_mesh);
 	filter->Update();
-	upper_test_transformed->DeepCopy(filter->GetOutput());
-
-	filter->SetInputData(lower_test);
-	filter->Update();
-	lower_test_transformed->DeepCopy(filter->GetOutput());
+	source_mesh_transformed->DeepCopy(filter->GetOutput());
 	//............................................................................................................
 
-	// We now have the transformed test polydatas (upper and lower), precisely aligned to one tooth in the upper
-	// So we can select a topologically matching point from test and base scan
+	// We now have the transformed source polydata, precisely aligned to one tooth 
+	// So we can select a topologically matching point from source and target
 
-	// First, we need the signed distance from the base seed point to the opposing arch
-	vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilter2 = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
-	distanceFilter2->SetInput(lower_base);
-	double opposing_point_base[3];
+	// First, we need the signed distance from the target seed point to the transformed source (and save the new source point)
+	vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilterTargetToSource = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
+	distanceFilterTargetToSource->SetTolerance(1e-12);
+	distanceFilterTargetToSource->SetInput(source_mesh_transformed);
+	double source_point_transformed[3];
+	double seed_upper[3];
+	seed_upper[0] = searchPoint_target.x; seed_upper[1] = searchPoint_target.y; seed_upper[2] = searchPoint_target.z;
 	//double signedDistanceBase = distanceFilter2->EvaluateFunction(seed);
-	double signedDistanceBase = distanceFilter2->EvaluateFunctionAndGetClosestPoint(seed, opposing_point_base);
-
-
-	// Next we need the closest point on the test mesh patch that was aligned to the base mesh
-	// ie the closest thing to a corresponding point
-	/*  THIS ONE GIVES UNSIGNED DISTANCE */
-	vtkSmartPointer<vtkCellLocator> distanceFilter = vtkSmartPointer<vtkCellLocator>::New();
-	distanceFilter->SetDataSet(upper_test_transformed);
-	distanceFilter->BuildLocator();
-	double closestPoint_test[3];
-	double closestPtDist2; //Squared distance
-	vtkIdType cellId;
-	int subId;
-	distanceFilter->FindClosestPoint(seed, closestPoint_test, cellId, subId, closestPtDist2);
-
-	// Finally we want the signed distance to the test opposing arch
-	vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilter3 = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
-	distanceFilter3->SetInput(lower_test_transformed);
-	double opposing_point_test[3];
-	double signedDistanceTest = distanceFilter3->EvaluateFunctionAndGetClosestPoint(closestPoint_test, opposing_point_test);
-
-	// Report
-	std::cout << "Base point : " << seed[0] << ", " << seed[1] << ", " << seed[2] << std::endl;
-	std::cout << "Base distance : " << signedDistanceBase << std::endl;
-	std::cout << "Base opposing point : " << opposing_point_base[0] << ", " << opposing_point_base[1] << ", " << opposing_point_base[2] << std::endl;
-	std::cout << "Test point : " << closestPoint_test[0] << ", " << closestPoint_test[1] << ", " << closestPoint_test[2] << std::endl;
-	std::cout << "Test distance : " << signedDistanceTest << std::endl;
-	std::cout << "Test opposing point : " << opposing_point_test[0] << ", " << opposing_point_test[1] << ", " << opposing_point_test[2] << std::endl;
-
-	// Save the data
-	ofstream out;
-	if (!fileExists("DataResults.txt"))
-	{
-		out.open("DataResults.txt", ios::app);
-		out << "Tooth,Base,Test,Base_point_x,Base_point_y,Base_point_z,Base_distance,Base_opposing_point_x,Base_opposing_point_y,Base_opposing_point_z,Test_point_x,Test_point_y,Test_point_z,Test_distance,Test_opposing_point_x,Test_opposing_point_y,Test_opposing_point_z" << std::endl;
-
-	}
-	else {
-		out.open("DataResults.txt", ios::app);
-	}
-
-	out << clp_filename << "," << upper_filename_base << "," << upper_filename_test;
-	out << "," << seed[0] << "," << seed[1] << "," << seed[2];
-	out << "," << signedDistanceBase;
-	out << "," << opposing_point_base[0] << "," << opposing_point_base[1] << "," << opposing_point_base[2];
-	out << "," << closestPoint_test[0] << "," << closestPoint_test[1] << "," << closestPoint_test[2];
-	out << "," << signedDistanceTest;
-	out << "," << opposing_point_test[0] << "," << opposing_point_test[1] << "," << opposing_point_test[2] << std::endl;
-
-	out.close();
-
+	double signedDistanceUpperToUpper = distanceFilterTargetToSource ->EvaluateFunctionAndGetClosestPoint(seed_upper, source_point_transformed);
 
 	
+	// Transform the new source point back to its original position using the inverse transformation
+	PointT pcl_pt_source_transformed, pcl_source_pt_back_to_start;
+	pcl_pt_source_transformed.x = source_point_transformed[0];
+	pcl_pt_source_transformed.y = source_point_transformed[1];
+	pcl_pt_source_transformed.z = source_point_transformed[2];
+	Eigen::Matrix4f u_inv = icpMatrix_source.inverse();
+	Eigen::Affine3f aff_t_source(u_inv);
+	pcl_source_pt_back_to_start = pcl::transformPoint(pcl_pt_source_transformed, aff_t_source);
+
+	// Insert the point into the original source mesh (no cell will be associated!) and save
+	const double p[3] = { pcl_source_pt_back_to_start.x, pcl_source_pt_back_to_start.y, pcl_source_pt_back_to_start.z };
+	source_mesh->GetPoints()->InsertNextPoint(p);
+
+	// Save
+	source_filename_base.erase(source_filename_base.length() - 4);
+	source_filename_base += "_new.ply";
+	vtkSmartPointer<vtkPLYWriter> poly_writer = vtkSmartPointer<vtkPLYWriter>::New();
+	poly_writer->SetInputData(source_mesh);
+	poly_writer->SetFileTypeToBinary();
+	poly_writer->SetFileName(source_filename_base.c_str());
+	poly_writer->SetArrayName("RGB");
+	poly_writer->Write();
+
+	
+
+	// Report
+	double location_error = pcl::euclideanDistance(pcl_pt_source_transformed, searchPoint_target);
+	double local_motion = pcl::euclideanDistance(pcl_pt_source_transformed, pcl_source_pt_back_to_start);
+	std::cout << "Index of new source point : " << source_mesh->GetNumberOfPoints() - 1 << std::endl;
+	std::cout << "Base point : " << seed_upper[0] << ", " << seed_upper[1] << ", " << seed_upper[2] << std::endl;
+	std::cout << "Topological location error : " << location_error << std::endl;
+	std::cout << "Point motion magnitude : " << local_motion << std::endl;
+
+
 
 
 	// Display colour mapped image if we want
