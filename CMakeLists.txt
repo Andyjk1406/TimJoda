@@ -7,9 +7,13 @@ include(${VTK_USE_FILE})
 
 find_package(PCL 1.7 REQUIRED)
 
-include_directories(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS})
+find_package(Open3D    QUIET HINTS "~/open3d_install/lib/CMake")
+
+include_directories(${PCL_INCLUDE_DIRS} ${Open3D_INCLUDE_DIRS} "c:\\repos\\autoscanning\\include")
+link_directories(${PCL_LIBRARY_DIRS} ${Open3D_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
+
+
  
 add_executable (YodaOcclusion YodaOcclusion.cpp)
 add_executable (AutoAlign AutoAlign.cpp)
@@ -52,9 +56,9 @@ else()
 endif()
 
 if(VTK_LIBRARIES)
-  target_link_libraries(RegionClipMeasure ${PCL_LIBRARIES} ${VTK_LIBRARIES})
+  target_link_libraries(RegionClipMeasure ${PCL_LIBRARIES} ${VTK_LIBRARIES} "c:\\myProjects\\autoscanning\\release\\scanner_libs.lib")
 else()
-  target_link_libraries(RegionClipMeasure ${PCL_LIBRARIES} vtkHybrid vtkWidgets)
+  target_link_libraries(RegionClipMeasure ${PCL_LIBRARIES} vtkHybrid vtkWidgets "c:\\myProjects\\autoscanning\\release\\scanner_libs.lib")
 endif()
 
 if(VTK_LIBRARIES)
@@ -70,7 +74,7 @@ else()
 endif()
 
 if(VTK_LIBRARIES)
-  target_link_libraries(CreateDistanceVTP ${PCL_LIBRARIES} ${VTK_LIBRARIES})
+  target_link_libraries(CreateDistanceVTP ${PCL_LIBRARIES} ${VTK_LIBRARIES} ${Open3D_LIBRARIES})
 else()
-  target_link_libraries(CreateDistanceVTP ${PCL_LIBRARIES} vtkHybrid vtkWidgets)
+  target_link_libraries(CreateDistanceVTP ${PCL_LIBRARIES} ${Open3D_LIBRARIES} vtkHybrid vtkWidgets)
 endif()

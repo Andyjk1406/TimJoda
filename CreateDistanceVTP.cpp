@@ -27,9 +27,12 @@
 #include <vtkAdaptiveSubdivisionFilter.h>
 #include <vtkPolyDataPointSampler.h>
 #include <vtkImplicitPolyDataDistance.h>
+#include <vtkPoints.h>
 
 #include "VTK_LoadSTLorPLY.hpp"
 #include <boost\filesystem.hpp>
+
+#include "Open3D/Open3D.h"
 
 
 float standard_deviation(vtkSmartPointer<vtkDistancePolyDataFilter> dist);
@@ -57,6 +60,11 @@ int main(int argc, char* argv[])
 	  source = loadSTLorPLY(source_filename);
 	  if (!source) return -1;
 
+	  auto o3d_source_mesh = open3d::io::CreateMeshFromFile(source_filename);
+	  o3d_source_mesh->ComputeVertexNormals();
+	  double mesh_area = o3d_source_mesh->GetSurfaceArea();
+	  std::cout << "Surface area of source mesh is : " << mesh_area << endl;
+
 	  boost::filesystem::path p(source_filename);
 	  p.replace_extension("vtp");
 	  source_filename_vtp = p.string();
@@ -67,16 +75,33 @@ int main(int argc, char* argv[])
 
 	  point_sampling_spacing = atof(argv[3]);
 
-
 	  // Upsampling the source mesh
+	  /*
+	  double dnumber_of_samples = mesh_area / (point_sampling_spacing*point_sampling_spacing);
+	  size_t number_of_samples = (size_t)dnumber_of_samples;
+	  std::cout << "Aiming for " << number_of_samples << " point samples to create a spacing of " <<point_sampling_spacing << endl;
+	  auto sampled = o3d_source_mesh->SamplePointsPoissonDisk(number_of_samples);
+	  std::cout << sampled->points_.size() << " samples taken" << endl;
+
+	  vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
+	  points->SetNumberOfPoints(sampled->points_.size());
+	  for (int i = 0; i < sampled->points_.size(); i++)
+		  points->SetPoint(i, sampled->points_[i].x(), sampled->points_[i].y(), sampled->points_[i].z());
+*/
+
+	  
 	  vtkSmartPointer<vtkPolyDataPointSampler> pointSampler = vtkSmartPointer<vtkPolyDataPointSampler>::New();
 	  pointSampler->SetDistance(point_sampling_spacing);
 	  pointSampler->SetInputData(source);
 	  pointSampler->Update();
+	  
 
 	  vtkIdType nPoints = pointSampler->GetOutput()->GetNumberOfPoints();
 	  std::cout << "Number of upsampled points in source : " << nPoints << std::endl;
+	  
+
 	  vtkSmartPointer<vtkPolyData> pd_sampled = vtkSmartPointer<vtkPolyData>::New();
+	 // pd_sampled->SetPoints(points);
 	  pd_sampled->DeepCopy(pointSampler->GetOutput());
 
 	  // Need to add some cells (vertices) to thee geometry 
