@@ -30,6 +30,11 @@
 #include <vtkPolyDataPointSampler.h>
 #include <vtkImplicitPolyDataDistance.h>
 
+#include <iostream>
+#include <fstream>
+
+using namespace std;
+
 
 float standard_deviation(vtkSmartPointer<vtkDistancePolyDataFilter> dist);
 

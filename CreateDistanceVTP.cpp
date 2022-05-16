@@ -34,10 +34,15 @@
 
 #include "Open3D/Open3D.h"
 
+#include <iostream>
+#include <fstream>
+
 
 float standard_deviation(vtkSmartPointer<vtkDistancePolyDataFilter> dist);
 
 bool fileExists(const char *fileName);
+
+using namespace std;
  
 int main(int argc, char* argv[])
 {

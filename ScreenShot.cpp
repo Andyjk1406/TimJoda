@@ -39,6 +39,9 @@
 #include <vtkWindowToImageFilter.h>
 #include <Eigen/dense>
 
+#include <iostream>
+#include <fstream>
+
 
 bool fileExists(const char *fileName);
 void saveVTKMat4x4(double position[3], double focal_point[3], double view_up[3], double view_angle, std::string f_name);
@@ -50,6 +53,8 @@ void KeypressCallbackFunction(
 	long unsigned int eventId,
 	void* clientData,
 	void* callData);
+
+using namespace std;
 
 int main(int argc, char* argv[])
 {
@@ -177,7 +182,7 @@ int main(int argc, char* argv[])
 	  // Screenshot  
 	  vtkSmartPointer<vtkWindowToImageFilter> windowToImageFilter =
 		  vtkSmartPointer<vtkWindowToImageFilter>::New();
-
+	 
 	  windowToImageFilter->SetInput(renWin);
 	  windowToImageFilter->SetMagnification(1); //set the resolution of the output image (1 times the current resolution of vtk render window)
 	  windowToImageFilter->SetInputBufferTypeToRGB(); //don't record the alpha (transparency) channel

@@ -33,9 +33,14 @@
 #include <vtkPolyDataPointSampler.h>
 #include <vtkImplicitPolyDataDistance.h>
 
+#include <iostream>
+#include <fstream>
+
 
 void writeData(std::string filename, int count, float max_dist);
 bool fileExists(const char *fileName);
+
+using namespace std;
  
 int main(int argc, char* argv[])
 {
