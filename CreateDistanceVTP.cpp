@@ -27,6 +27,7 @@
 #include <vtkAdaptiveSubdivisionFilter.h>
 #include <vtkPolyDataPointSampler.h>
 #include <vtkImplicitPolyDataDistance.h>
+#include <vtkDistancePolyDataFilter.h>
 #include <vtkPoints.h>
 
 #include "VTK_LoadSTLorPLY.hpp"
@@ -109,26 +110,41 @@ int main(int argc, char* argv[])
 	 // pd_sampled->SetPoints(points);
 	  pd_sampled->DeepCopy(pointSampler->GetOutput());
 
-	  // Need to add some cells (vertices) to thee geometry 
+	  // Need to add some cells (vertices) to the geometry 
 	  vtkSmartPointer<vtkVertexGlyphFilter> vertexGlyphFilter = vtkSmartPointer<vtkVertexGlyphFilter>::New();
 	  vertexGlyphFilter->AddInputData(pd_sampled);
 	  vertexGlyphFilter->Update();
 
 	  vtkSmartPointer<vtkDoubleArray> distances = vtkSmartPointer<vtkDoubleArray>::New(); // The scalar array holding the distances
 	  distances->SetNumberOfValues(nPoints);
+	  std::vector<double> vDistances(nPoints);
 
+	  std::vector< vtkSmartPointer<vtkImplicitPolyDataDistance>> distance_filters;
+	  
 	  // We want the signed distance to the target mesh
-	  vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilter = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
-	  distanceFilter->SetInput(target);
-	  for (vtkIdType i = 0; i < nPoints; i++)
+	  for (int i = 0; i < omp_get_max_threads(); ++i)
+	  {
+		  vtkSmartPointer<vtkImplicitPolyDataDistance> distanceFilter = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
+		  vtkSmartPointer<vtkPolyData> pd = vtkSmartPointer<vtkPolyData>::New();
+		  pd->DeepCopy(target);
+		  distanceFilter->SetInput(pd);
+		  distance_filters.push_back(distanceFilter);
+	  }
+
+	  std::cout << "Searching...";
+#pragma omp parallel for
+	  for (int i = 0; i < nPoints; i++)
 	  {
 		  double test_point[3];
 		  pd_sampled->GetPoint(i, test_point);
+		  
 		  double opposing_point_test[3];
-		  double signedDistanceTest = distanceFilter->EvaluateFunctionAndGetClosestPoint(test_point, opposing_point_test);
+		  double signedDistanceTest = distance_filters[omp_get_thread_num()]->EvaluateFunctionAndGetClosestPoint(test_point, opposing_point_test);
 		  distances->SetValue(i, signedDistanceTest);
+		 
 	  }
-
+	  std::cout << "done\n";
+	 
 	  pd_sampled->GetPointData()->SetScalars(distances);
 
 	  // Get the mean/SD data and save it

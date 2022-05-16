@@ -42,6 +42,10 @@
 #include <pcl/io/vtk_lib_io.h>
 #include <pcl/registration/icp.h>
 
+#include <iostream>
+using namespace std;
+
+
 // Types
 typedef pcl::PointNormal PointT;
 typedef pcl::PointCloud<PointT> PointCloudT;

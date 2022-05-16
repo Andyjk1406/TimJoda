@@ -184,7 +184,7 @@ int main(int argc, char* argv[])
 		  vtkSmartPointer<vtkWindowToImageFilter>::New();
 	 
 	  windowToImageFilter->SetInput(renWin);
-	  windowToImageFilter->SetMagnification(1); //set the resolution of the output image (1 times the current resolution of vtk render window)
+	  windowToImageFilter->SetScale(1); //set the resolution of the output image (1 times the current resolution of vtk render window)
 	  windowToImageFilter->SetInputBufferTypeToRGB(); //don't record the alpha (transparency) channel
 	  windowToImageFilter->ReadFrontBufferOn(); // read from the back buffer Not for this one - otherwise its sketchy
 	  windowToImageFilter->Modified();

@@ -78,3 +78,9 @@ if(VTK_LIBRARIES)
 else()
   target_link_libraries(CreateDistanceVTP ${PCL_LIBRARIES} ${Open3D_LIBRARIES} vtkHybrid vtkWidgets)
 endif()
+
+  # vtk_module_autoinit is needed
+  vtk_module_autoinit(
+    TARGETS CreateDistanceVTP
+    MODULES ${VTK_LIBRARIES}
+    )

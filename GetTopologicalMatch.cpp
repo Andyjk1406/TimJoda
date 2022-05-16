@@ -48,6 +48,9 @@
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/io/ply_io.h>
 
+#include <iostream>
+using namespace std;
+
 // Types
 typedef pcl::PointNormal PointT;
 typedef pcl::PointCloud<PointT> PointCloudT;
