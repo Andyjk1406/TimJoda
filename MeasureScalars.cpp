@@ -37,8 +37,8 @@
 #include <fstream>
 
 
-void writeData(std::string filename, int count, float max_dist);
-bool fileExists(const char *fileName);
+void writeData(std::string output_filename, std::string filename, int count, float max_dist);
+bool fileExists(const char* fileName);
 
 using namespace std;
  
@@ -47,11 +47,12 @@ int main(int argc, char* argv[])
   	
   vtkSmartPointer<vtkPolyData> model = vtkSmartPointer<vtkPolyData>::New();
   std::string model_filename;
+  std::string output_filename;
 
   float max_distance = 0.1;
  
   // Load the VTP file (a uniform cloud) 
-  if (argc == 3)
+  if (argc == 4)
    {
 
 	 model_filename = argv[1];
@@ -62,6 +63,8 @@ int main(int argc, char* argv[])
 	 model->DeepCopy(reader->GetOutput());
 
 	 max_distance = atof(argv[2]);
+
+	 output_filename = argv[3];
 			
     }
   else
@@ -84,11 +87,11 @@ int main(int argc, char* argv[])
 	  double dist;
 	  distances->GetTuple(i, &dist);
 
-	  if (dist <= max_distance) counter++;
+	  if (dist <= max_distance && dist > -0.5) counter++;
   }
 
   std::cout << counter << " valid points found" << std::endl;
-  writeData(model_filename, counter, max_distance);
+  writeData(output_filename, model_filename, counter, max_distance);
 	  
  
  
@@ -133,20 +136,22 @@ bool fileExists(const char *fileName)
 }
 
 
-void writeData(std::string filename, int count, float max_dist)
+void writeData(std::string output_filename, std::string filename, int count, float max_dist)
 {
 	ofstream out;
-	if (!fileExists("nPointsInRange.txt"))
+	if (!fileExists(output_filename.c_str()))
 	{
-		out.open("nPointsInRange.txt", ios::app);
-		out << "Source nPointsinRange RangeMax" << endl;
+		out.open(output_filename.c_str(), ios::app);
+		out << "Source nPointsinRange Area(mm2) RangeMax" << endl;
 
 	}
 	else {
-		out.open("nPointsInRange.txt", ios::app);
+		out.open(output_filename.c_str(), ios::app);
 	}
 
-	out << filename << " " << count;
+	double area = (double)count * 0.000625;
+
+	out << filename << " " << count<< " "<<area<<" ";
 	out << " " << max_dist << std::endl;
 	
 	out.close();

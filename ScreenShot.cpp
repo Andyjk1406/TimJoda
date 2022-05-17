@@ -35,12 +35,15 @@
 #include <vtkInteractorStyleTrackballCamera.h>
 #include <vtkPNGWriter.h>
 #include <vtkCellPicker.h>
+#include <vtkPCANormalEstimation.h>
+#include <vtkSTLReader.h>
 
 #include <vtkWindowToImageFilter.h>
 #include <Eigen/dense>
 
 #include <iostream>
 #include <fstream>
+#include <vtkPointLocator.h>
 
 
 bool fileExists(const char *fileName);
@@ -60,6 +63,7 @@ int main(int argc, char* argv[])
 {
   	
   vtkSmartPointer<vtkPolyData> poly = vtkSmartPointer<vtkPolyData>::New();
+  vtkSmartPointer<vtkPolyData> poly_stl = vtkSmartPointer<vtkPolyData>::New();
  
   // The camera position data	
   double view_angle;
@@ -67,10 +71,12 @@ int main(int argc, char* argv[])
   double focal_point[3];
   double view_up[3];
   bool have_camera = false;
+  bool have_stl = false;
  
   std::string filename;
   std::string filename_vtp;
   std::string filename_png;
+  std::string filename_stl;
 
   std::string filename_camera_data;
 
@@ -82,6 +88,7 @@ int main(int argc, char* argv[])
 	
 	 filename_vtp = filename + ".vtp";
 	 filename_png = filename + ".png";
+	 filename_stl = filename + ".stl";
 	
 	 vtkNew<vtkXMLPolyDataReader> reader1;
 	 reader1->SetFileName(filename_vtp.c_str());
@@ -89,6 +96,40 @@ int main(int argc, char* argv[])
 	 poly->DeepCopy(reader1->GetOutput());
 
 	 std::cout << "Poly Loaded with " << poly->GetPoints()->GetNumberOfPoints() << " points" <<std::endl;
+
+	
+		 vtkNew<vtkSTLReader> reader2;
+		 reader2->SetFileName(filename_stl.c_str());
+		 reader2->Update();
+		 poly_stl->DeepCopy(reader2->GetOutput());
+	
+		 if (poly_stl->GetPoints()->GetNumberOfPoints() > 0) {
+			 std::cout << "STL also loaded\n";
+			 have_stl = true;
+
+			 // Map the closest scalar values to the STL
+			 vtkNew<vtkPointLocator> pointLocator;
+			 pointLocator->SetDataSet(poly);
+			 pointLocator->BuildLocator();
+
+			 vtkSmartPointer<vtkDoubleArray> distances = vtkSmartPointer<vtkDoubleArray>::New(); // The scalar array holding the distances
+			 distances->SetNumberOfValues(poly_stl->GetNumberOfPoints());
+			 for (vtkIdType i = 0; i < distances->GetNumberOfTuples(); ++i)
+			 {
+
+				 double test_point[3];
+				 poly_stl->GetPoint(i, test_point);
+
+				 // Find closest point
+				 vtkIdType ptId;
+				 double dist;
+				 ptId = pointLocator->FindClosestPoint(test_point);
+				 distances->SetValue(i, poly->GetPointData()->GetScalars()->GetTuple1(ptId));
+			 }
+
+			 poly_stl->GetPointData()->SetScalars(distances);
+		 }
+
 
     }
 
@@ -114,13 +155,26 @@ int main(int argc, char* argv[])
   
   // Check Scalars
   vtkSmartPointer<vtkDoubleArray> poly_scalars; 
-  poly_scalars = vtkDoubleArray::SafeDownCast(poly->GetPointData()->GetScalars());
+  if (have_stl) {
+	  poly_scalars = vtkDoubleArray::SafeDownCast(poly_stl->GetPointData()->GetScalars());
 
+  }
+  else {
+	  poly_scalars = vtkDoubleArray::SafeDownCast(poly->GetPointData()->GetScalars());
+  }
+  
   std::cout << "Loaded : " << poly_scalars->GetTuple1(10) << std::endl;
 
   // Display colour mapped image if we want
   vtkSmartPointer<vtkPolyDataMapper> mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-  mapper->SetInputData( poly );
+  if (have_stl)
+  {
+	  mapper->SetInputData(poly_stl);
+  }
+  
+  else {
+	  mapper->SetInputData(poly);
+  }
  // mapper->SetScalarRange(poly->GetPointData()->GetScalars()->GetRange()[0], poly->GetPointData()->GetScalars()->GetRange()[1]);
   mapper->SetScalarRange(-0.2, 0.2);
   
@@ -201,7 +255,6 @@ int main(int argc, char* argv[])
 
 	  renWinInteractor->Start();
   }
-
 
   return EXIT_SUCCESS;
 }

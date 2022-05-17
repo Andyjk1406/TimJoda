@@ -84,3 +84,8 @@ endif()
     TARGETS CreateDistanceVTP
     MODULES ${VTK_LIBRARIES}
     )
+
+vtk_module_autoinit(
+    TARGETS ScreenShot
+    MODULES ${VTK_LIBRARIES}
+    )

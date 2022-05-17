@@ -54,6 +54,7 @@ int main(int argc, char* argv[])
 
   std::string source_filename, target_filename;
   std::string source_filename_vtp;
+  std::string output_ply_filename;
    
   
   // Load the 2 STL/PLY files, source and target and get the sampling spacing
